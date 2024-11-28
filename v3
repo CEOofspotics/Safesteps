@@ -1,0 +1,98 @@
+#include <TinyGPS++.h>
+#include <HardwareSerial.h>
+
+HardwareSerial GPSModule(1);
+TinyGPSPlus gps;
+
+
+HardwareSerial SIM800L(2);
+
+
+const int touchPin = 4;
+
+
+unsigned long lastPressTime = 0;
+unsigned int sosPattern[9] = {200, 200, 200, 600, 600, 600, 200, 200, 200};
+unsigned int detectedPattern[9];
+int patternIndex = 0;
+bool sosDetected = false;
+
+
+void sendSMS(const String& message) {
+  SIM800L.println("AT+CMGF=1"); 
+  delay(1000);
+  SIM800L.println("AT+CMGS=\"+916362861485\""); 
+  delay(1000);
+  SIM800L.println(message); 
+  delay(1000);
+  SIM800L.write(26); 
+  delay(5000);
+}
+
+// Fetch GPS location
+String getGPSLocation() {
+  String location = "not able to get locatipn";
+  while (GPSModule.available()) {
+    if (gps.encode(GPSModule.read())) {
+      if (gps.location.isUpdated()) {
+        location = "Lat: " + String(gps.location.lat(), 6) + ", Lon: " + String(gps.location.lng(), 6);
+        break;
+      }
+    }
+  }
+  return location;
+}
+
+void setup() {
+  Serial.begin(115200);
+  
+  
+  GPSModule.begin(9600, SERIAL_8N1, 27, 26);
+
+  
+  SIM800L.begin(9600, SERIAL_8N1, 17, 16);
+
+  
+  pinMode(touchPin, INPUT);
+}
+
+void loop() {
+  // this reads the state of the sensor
+  int touchState = digitalRead(touchPin);
+
+  if (touchState == HIGH) {
+    unsigned long pressTime = millis() - lastPressTime;
+
+    // record the input from the sensors
+    if (patternIndex < 9) {
+      detectedPattern[patternIndex++] = pressTime;
+    } else {
+      patternIndex = 0; 
+    }
+
+    lastPressTime = millis();
+
+    // this checks if the sos signals match 
+    if (patternIndex == 9) {
+      sosDetected = true;
+      for (int i = 0; i < 9; i++) {
+        if (abs(detectedPattern[i] - sosPattern[i]) > 100) { 
+          sosDetected = false;
+          break;
+        }
+      }
+
+      // this is the part that sends the messages via sms and gps
+      if (sosDetected) {
+        String gpsLocation = getGPSLocation();
+        String emergencyMessage = "SOS Alert! Location: " + gpsLocation;
+        sendSMS(emergencyMessage);
+      }
+
+      // Reset for the next detection
+      patternIndex = 0;
+    }
+  }
+
+  delay(50);
+}
